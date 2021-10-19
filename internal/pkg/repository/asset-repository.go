@@ -89,15 +89,63 @@ func getAssetID(account string, assetName string) (uint64, error){
 	return assetID, nil
 }
 
-func(r *AssetRepository) Create(asset *models.Asset) string {
 
-	
+func (r *AssetRepository) Simulate() {
+	fmt.Println("We'll need min of 2 accounts in order to simulate a real life event")
+	fmt.Println("For this simulation we'll use 3")
+	fmt.Println("1 for organization admin, 1 for compliance, 1 for other user")
 
+	accounts := GetAccountRepository().loadAccounts();
+	asset := &models.Asset{
+		Creator: "Talabi",
+		Name: "Talabiii",
+		UnitName: "TAL2",
+		Note: "Talabi",
+		Decimals: 2,
+		TotalSupply: 10000,
+		Manager: accounts[0].PublicKey,
+		ReserveAuthAddress: accounts[1].PublicKey,
+		FreezeAuthAddress: accounts[1].PublicKey,
+		ClawbackAuthAddress: accounts[1].PublicKey,
+	}
+
+	assetResponse, err := assetRepository.Create(asset)
+	if err != nil {
+		fmt.Printf("Error occurred %v\n", err)
+	}
+	_  = assetResponse
+	fmt.Println("user needs to opt-in to asset before making txns with asset")
+	userMnemonic := "image travel claw climb bottom spot path roast century also task cherry address curious save item clean theme amateur loyal apart hybrid steak about blanket"
+	interest := assetRepository.MarkAssetInterest(accounts[0].Address, "Talabiii", userMnemonic)
+	if interest == false {
+		fmt.Println("Unable to opt-in to asset")
+	}
+	fmt.Println("user being able to trade asset: being able to receive asset")
+	senderMnemonic := "portion never forward pill lunch organ biology weird catch curve isolate plug innocent skin grunt bounce clown mercy hole eagle soul chunk type absorb trim"
+	txnResponse, txnSuccess := assetRepository.Transfer(senderMnemonic, accounts[2].Address, "Talabiii")
+	if txnSuccess == false {
+		fmt.Println("Please confirm user opt-in to asset")
+	}
+	_ = txnResponse
+	fmt.Println("a fraud complaint has been raised with respect to user")
+	fmt.Println("Compliance within organization decides to freeze user from transacting asset")
+
+	authorizerMnemonic := "place blouse sad pigeon wing warrior wild script problem team blouse camp soldier breeze twist mother vanish public glass code arrow execute convince ability there"
+	isFrozen := assetRepository.FreezeAddress(accounts[2].Address, authorizerMnemonic, "Talabiii");
+	if isFrozen == false {
+		fmt.Println("unable to freeze user at this time")
+	}
+	fmt.Printf("user with address: %v cannot trade assets for now", accounts[2].Address)
+}
+
+
+
+func(a *AssetRepository) Create(asset *models.Asset) (string, error) {
 	// Get network-related transaction parameters and assign
 	txParams, err := algodClient.SuggestedParams().Do(context.Background())
 	if err != nil {
 		fmt.Printf("Error getting suggested tx params: %s\n", err)
-		return ""
+		return "", err
 	}
 	// comment out the next two (2) lines to use suggested fees
 	txParams.FlatFee = true
@@ -126,21 +174,21 @@ func(r *AssetRepository) Create(asset *models.Asset) string {
 
 	if err != nil {
 		fmt.Printf("Failed to make asset: %s\n", err)
-		return ""
+		return "", err
 	}
 	fmt.Printf("Asset created AssetName: %s\n", txn.AssetConfigTxnFields.AssetParams.AssetName)
 	// sign the transaction
 	txid, stx, err := crypto.SignTransaction(ed25519.PrivateKey(accounts[0].SecretKey), txn)
 	if err != nil {
 		fmt.Printf("Failed to sign transaction: %s\n", err)
-		return ""
+		return "", err
 	}
 	fmt.Printf("Transaction ID: %s\n", txid)
 	// Broadcast the transaction to the network
 	sendResponse, err := algodClient.SendRawTransaction(stx).Do(context.Background())
 	if err != nil {
 		fmt.Printf("failed to send transaction: %s\n", err)
-		return ""
+		return "", err
 	}
 	fmt.Printf("Submitted transaction %s\n", sendResponse)
 	// Wait for transaction to be confirmed
@@ -148,7 +196,7 @@ func(r *AssetRepository) Create(asset *models.Asset) string {
 	act, err := algodClient.AccountInformation(accounts[0].PublicKey).Do(context.Background())
 	if err != nil {
 		fmt.Printf("failed to get account information: %s\n", err)
-		return ""
+		return "", err
 	}
 
 	assetID := uint64(0)
@@ -163,7 +211,7 @@ func(r *AssetRepository) Create(asset *models.Asset) string {
 	fmt.Printf("Asset ID: %d\n", assetID)
 	printCreatedAsset(assetID, accounts[0].PublicKey, algodClient)
 	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
-	return string(rune(assetID))
+	return string(rune(assetID)), nil
 }
 
 func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetName string, userMnemonic string) bool{
@@ -229,26 +277,8 @@ func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetNam
 	printAssetHolding(assetID, user.PublicKey, algodClient)
 	return true
 }
-	// your terminal output should be similar to this...
 
-	// Transaction ID: JYVJEB25YMAVNSAFDTZECWMJTKZHSFJGICGGXF64TH5RTXDICIUA
-	// Transaction ID raw: JYVJEB25YMAVNSAFDTZECWMJTKZHSFJGICGGXF64TH5RTXDICIUA
-	// waiting for confirmation
-	// Transaction JYVJEB25YMAVNSAFDTZECWMJTKZHSFJGICGGXF64TH5RTXDICIUA confirmed in round 4086079
-	// Asset ID: 2654040
-	// Account 3: 3ZQ3SHCYIKSGK7MTZ7PE7S6EDOFWLKDQ6RYYVMT7OHNQ4UJ774LE52AQCU
-	// {
-	// 	"amount": 0,
-	// 	"asset-id": 2654040,
-	// 	"creator": "THQHGD4HEESOPSJJYYF34MWKOI57HXBX4XR63EPBKCWPOJG5KUPDJ7QJCM"
-	// } 
-
-	// TRANSFER ASSET
-	
-	// Send  10 latinum from Account 1 to Account 3
-	// assetID := uint64(332920)
-	// Get network-related transaction parameters and assign
-func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress string, assetName string, ) (string, bool){
+func (a *AssetRepository) Transfer(senderMnenomics string, receiverAddress string, assetName string, ) (string, bool){
 	// load secretKey from Mnemonics
 	sender := GetAccountRepository().GetAccountByMnenomics(senderMnenomics)
 	assetID, err := getAssetID(sender.PublicKey, assetName)
@@ -301,30 +331,8 @@ func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress str
 	printAssetHolding(assetID, receiverAddress, algodClient)
 	return txid, true
 }
-	// Your terminal output should look similar to this
-	// Transaction ID: 7GPXSVF6YYHHHIGHDCGGR2AS2XXLMDXTUR6GUTSZU4GMIOK2V7TQ
-	// Transaction ID raw: 7GPXSVF6YYHHHIGHDCGGR2AS2XXLMDXTUR6GUTSZU4GMIOK2V7TQ
-	// waiting for confirmation
-	// Transaction 7GPXSVF6YYHHHIGHDCGGR2AS2XXLMDXTUR6GUTSZU4GMIOK2V7TQ confirmed in round 4086081
-	// Asset ID: 2654040
-	// Account 3: 3ZQ3SHCYIKSGK7MTZ7PE7S6EDOFWLKDQ6RYYVMT7OHNQ4UJ774LE52AQCU
-	// {
-	// 	"amount": 10,
-	// 	"asset-id": 2654040,
-	// 	"creator": "THQHGD4HEESOPSJJYYF34MWKOI57HXBX4XR63EPBKCWPOJG5KUPDJ7QJCM"
-	// } 
-	// Account 1: THQHGD4HEESOPSJJYYF34MWKOI57HXBX4XR63EPBKCWPOJG5KUPDJ7QJCM
-	// {
-	// 	"amount": 990,
-	// 	"asset-id": 2654040,
-	// 	"creator": "THQHGD4HEESOPSJJYYF34MWKOI57HXBX4XR63EPBKCWPOJG5KUPDJ7QJCM"
-	// } 
-
-	// FREEZE ASSET
-	// The freeze address (Account 2) Freeze's asset for Account 3.
-	// assetID := uint64(332920)
-	// Get network-related transaction parameters and assign
-func(a *AccountRepository) FreezeAddress(defaulterAddress string, authorizerMnemonics string, assetName string) bool{
+// Get network-related transaction parameters and assign
+func(a *AssetRepository) FreezeAddress(defaulterAddress string, authorizerMnemonics string, assetName string) bool{
 	authorizer := GetAccountRepository().GetAccountByMnenomics(authorizerMnemonics);
 	assetID, err := getAssetID(authorizer.PublicKey, assetName)
 	if err != nil {

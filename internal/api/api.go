@@ -5,7 +5,6 @@ import (
 
 	"github.com/algorand/go-algorand-sdk/client/v2/algod"
 	"github.com/bezaeel/algorand/bez-rand/internal/pkg/config"
-	"github.com/bezaeel/algorand/bez-rand/internal/pkg/models/assets"
 	"github.com/bezaeel/algorand/bez-rand/internal/pkg/repository"
 )
 
@@ -32,14 +31,7 @@ func Run(configPath string){
 	}
 	asset := repository.GetAssetRepository(_algodClient)
 	
-	asset.Create(&assets.Asset{
-		Creator: "Talabi",
-		Name: "Talabii",
-		UnitName: "TAL1",
-		Note: "Talabi",
-		Decimals: 2,
-		TotalSupply: 10000,
-	})
+	asset.Simulate()
 	
 	
 }

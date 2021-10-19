@@ -22,6 +22,7 @@ func GetAccountRepository() *AccountRepository{
 	return accountRepository
 }
 
+
 func (a *AccountRepository) loadAccounts() []*accounts.Account {
 	var accts []*accounts.Account
 	mnemonic1 := "portion never forward pill lunch organ biology weird catch curve isolate plug innocent skin grunt bounce clown mercy hole eagle soul chunk type absorb trim"
