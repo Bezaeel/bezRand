@@ -17,25 +17,16 @@ type AssetRepository struct {}
 var assetRepository *AssetRepository
 var algodClient *algod.Client
 
-func GetAssetRepository() *AssetRepository{
+func GetAssetRepository(_algodClient *algod.Client) *AssetRepository{
 	if  assetRepository == nil {
 		assetRepository = &AssetRepository{}
 	}
-	initClient()
+	algodClient = _algodClient
 	return assetRepository
 }
 
 // sandbox
-const algodAddress = "http://localhost:4001"
-const algodToken = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-func initClient(){
-	_algodClient, err := algod.MakeClient(algodAddress, algodToken)
-	if err != nil{
-		return
-	}
-	algodClient = _algodClient
-}
 
 // prettyPrint prints Go structs
 func prettyPrint(data interface{}) {
@@ -81,6 +72,23 @@ func printCreatedAsset(assetID uint64, account string, client *algod.Client) {
 	}
 }
 
+func getAssetID(account string, assetName string) (uint64, error){ 
+	act, err := algodClient.AccountInformation(account).Do(context.Background())
+	if err != nil {
+		fmt.Printf("failed to get account information: %s\n", err)
+		return 0,err
+	}
+
+	assetID := uint64(0)
+	//	find newest (highest) asset for this account
+	for _, asset := range act.CreatedAssets {
+		if asset.Index > assetID {
+			assetID = asset.Index
+		}
+	}
+	return assetID, nil
+}
+
 func(r *AssetRepository) Create(asset *models.Asset) string {
 
 	
@@ -97,7 +105,7 @@ func(r *AssetRepository) Create(asset *models.Asset) string {
 
 	// Get pre-defined set of keys for example
 	accounts := GetAccountRepository().loadAccounts()
-	creator := accounts[1].PublicKey
+	creator := accounts[0].PublicKey
 	assetName := asset.Name
 	unitName := asset.UnitName
 	assetURL := "https://path/to/my/asset/details"
@@ -155,7 +163,7 @@ func(r *AssetRepository) Create(asset *models.Asset) string {
 	fmt.Printf("Asset ID: %d\n", assetID)
 	printCreatedAsset(assetID, accounts[0].PublicKey, algodClient)
 	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
-	return string(assetID)
+	return string(rune(assetID))
 }
 
 func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetName string, userMnemonic string) bool{
@@ -205,6 +213,7 @@ func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetNam
 	fmt.Printf("Transaction ID: %s\n", txid)
 	// Broadcast the transaction to the network
 	sendResponse, err := algodClient.SendRawTransaction(stx).Do(context.Background())
+	_ = sendResponse
 	if err != nil {
 		fmt.Printf("failed to send transaction: %s\n", err)
 		return false
@@ -216,7 +225,6 @@ func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetNam
 
 	// print created assetholding for this asset and Account 3, showing 0 balance
 	fmt.Printf("Asset ID: %d\n", assetID)
-	fmt.Printf("Asset ID: %d\n", sendResponse)
 	fmt.Printf("Account 3: %s\n", user.PublicKey)
 	printAssetHolding(assetID, user.PublicKey, algodClient)
 	return true
@@ -241,8 +249,12 @@ func (a *AssetRepository) MarkAssetInterest(assetCreatorAddress string, assetNam
 	// assetID := uint64(332920)
 	// Get network-related transaction parameters and assign
 func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress string, assetName string, ) (string, bool){
-	//load secretKey from Mnemonics
+	// load secretKey from Mnemonics
 	sender := GetAccountRepository().GetAccountByMnenomics(senderMnenomics)
+	assetID, err := getAssetID(sender.PublicKey, assetName)
+	if err != nil {
+		return "invalid asset", false
+	}
 	txParams, err := algodClient.SuggestedParams().Do(context.Background())
 	if err != nil {
 		fmt.Printf("Error getting suggested tx params: %s\n", err)
@@ -252,7 +264,7 @@ func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress str
 	txParams.FlatFee = true
 	txParams.Fee = 1000
 
-	sender := accounts[0].PublicKey
+	// sender := accounts[0].PublicKey
 	// recipient := accounts[2].PublicKey
 	amount := uint64(10)
 	closeRemainderTo := ""
@@ -262,7 +274,7 @@ func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress str
 		fmt.Printf("Failed to send transaction MakeAssetTransfer Txn: %s\n", err)
 		return "", false
 	}
-	txid, stx, err := crypto.SignTransaction(ed25519.PrivateKey(accounts[0].SecretKey), txn)
+	txid, stx, err := crypto.SignTransaction(ed25519.PrivateKey(sender.SecretKey), txn)
 	if err != nil {
 		fmt.Printf("Failed to sign transaction: %s\n", err)
 		return "", false
@@ -270,6 +282,7 @@ func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress str
 	fmt.Printf("Transaction ID: %s\n", txid)
 	// Broadcast the transaction to the network
 	sendResponse, err := algodClient.SendRawTransaction(stx).Do(context.Background())
+	_ = sendResponse
 	if err != nil {
 		fmt.Printf("failed to send transaction: %s\n", err)
 		return "", false
@@ -311,41 +324,46 @@ func (a *AccountRepository) Transfer(senderMnenomics string, receiverAddress str
 	// The freeze address (Account 2) Freeze's asset for Account 3.
 	// assetID := uint64(332920)
 	// Get network-related transaction parameters and assign
-func(a *AccountRepository) FreezeAddress(defaulterAddress string, authorizerAddress string) bool{
-	txParams, err = algodClient.SuggestedParams().Do(context.Background())
+func(a *AccountRepository) FreezeAddress(defaulterAddress string, authorizerMnemonics string, assetName string) bool{
+	authorizer := GetAccountRepository().GetAccountByMnenomics(authorizerMnemonics);
+	assetID, err := getAssetID(authorizer.PublicKey, assetName)
+	if err != nil {
+		return false
+	}
+	txParams, err := algodClient.SuggestedParams().Do(context.Background())
 	if err != nil {
 		fmt.Printf("Error getting suggested tx params: %s\n", err)
-		return
+		return false
 	}
 	// comment out the next two (2) lines to use suggested fees
 	txParams.FlatFee = true
 	txParams.Fee = 1000
 	newFreezeSetting := true
-	target := accounts[2].PublicKey
-	txn, err = transaction.MakeAssetFreezeTxn(authorizerAddress, note, txParams, assetID, defaulterAddress, newFreezeSetting)
+	txn, err := transaction.MakeAssetFreezeTxn(authorizer.SecretKey, []byte(nil), txParams, assetID, defaulterAddress, newFreezeSetting)
 	if err != nil {
 		fmt.Printf("Failed to send txn: %s\n", err)
-		return
+		return false
 	}
-	txid, stx, err = crypto.SignTransaction(ed25519.PrivateKey(accounts[1].SecretKey), txn)
+	txid, stx, err := crypto.SignTransaction(ed25519.PrivateKey(authorizer.PublicKey), txn)
 	if err != nil {
 		fmt.Printf("Failed to sign transaction: %s\n", err)
-		return
+		return false
 	}
 	fmt.Printf("Transaction ID: %s\n", txid)
 	// Broadcast the transaction to the network
-	sendResponse, err = algodClient.SendRawTransaction(stx).Do(context.Background())
+	sendResponse, err := algodClient.SendRawTransaction(stx).Do(context.Background())
+	_ = sendResponse
 	if err != nil {
 		fmt.Printf("failed to send transaction: %s\n", err)
-		return
+		return false
 	}
 	fmt.Printf("Transaction ID raw: %s\n", txid)
 	// Wait for transaction to be confirmed
 	GetAccountRepository().waitForConfirmation(txid,algodClient)
     // You should now see is-frozen value of true
 	fmt.Printf("Asset ID: %d\n", assetID)
-	fmt.Printf("Account 3: %s\n", accounts[2].PublicKey)
-	printAssetHolding(assetID, accounts[2].PublicKey, algodClient)
+	fmt.Printf("Account 3: %s\n", defaulterAddress)
+	printAssetHolding(assetID, defaulterAddress, algodClient)
 	return true
 }
 	
@@ -371,47 +389,47 @@ func(a *AccountRepository) FreezeAddress(defaulterAddress string, authorizerAddr
 	// and places it back with Account 1 (creator).
 	// assetID := uint64(332920)
 	// Get network-related transaction parameters and assign
-func revoke()	{
-	txParams, err = algodClient.SuggestedParams().Do(context.Background())
-	if err != nil {
-		fmt.Printf("Error getting suggested tx params: %s\n", err)
-		return
-	}
-	// comment out the next two (2) lines to use suggested fees
-	txParams.FlatFee = true
-	txParams.Fee = 1000
-	target = accounts[3].PublicKey
-	txn, err = transaction.MakeAssetRevocationTxn(clawback, target, amount, creator, note,
-		txParams, assetID)
-	if err != nil {
-		fmt.Printf("Failed to send txn: %s\n", err)
-		return
-	}
-	txid, stx, err = crypto.SignTransaction(ed25519.PrivateKey(accounts[1].SecretKey), txn)
-	if err != nil {
-		fmt.Printf("Failed to sign transaction: %s\n", err)
-		return
-	}
-	fmt.Printf("Transaction ID: %s\n", txid)
-	// Broadcast the transaction to the network
-	sendResponse, err = algodClient.SendRawTransaction(stx).Do(context.Background())
-	if err != nil {
-		fmt.Printf("failed to send transaction: %s\n", err)
-		return
-	}
-	fmt.Printf("Transaction ID raw: %s\n", txid)
-	// Wait for transaction to be confirmed
-	GetAccountRepository().waitForConfirmation( txid, algodClient)
-	// print created assetholding for this asset and Account 3 and Account 1
-	// You should see amount of 0 in Account 3, and 1000 in Account 1
-	fmt.Printf("Asset ID: %d\n", assetID)
-	fmt.Printf("recipient")
-	fmt.Printf("Account 3: %s\n", accounts[2].PublicKey)
-	printAssetHolding(assetID, accounts[2].PublicKey, algodClient)
-	fmt.Printf("target")
-	fmt.Printf("Account 1: %s\n", accounts[0].PublicKey)
-	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
-}
+// func revoke()	{
+// 	txParams, err = algodClient.SuggestedParams().Do(context.Background())
+// 	if err != nil {
+// 		fmt.Printf("Error getting suggested tx params: %s\n", err)
+// 		return
+// 	}
+// 	// comment out the next two (2) lines to use suggested fees
+// 	txParams.FlatFee = true
+// 	txParams.Fee = 1000
+// 	target = accounts[3].PublicKey
+// 	txn, err = transaction.MakeAssetRevocationTxn(clawback, target, amount, creator, note,
+// 		txParams, assetID)
+// 	if err != nil {
+// 		fmt.Printf("Failed to send txn: %s\n", err)
+// 		return
+// 	}
+// 	txid, stx, err = crypto.SignTransaction(ed25519.PrivateKey(accounts[1].SecretKey), txn)
+// 	if err != nil {
+// 		fmt.Printf("Failed to sign transaction: %s\n", err)
+// 		return
+// 	}
+// 	fmt.Printf("Transaction ID: %s\n", txid)
+// 	// Broadcast the transaction to the network
+// 	sendResponse, err = algodClient.SendRawTransaction(stx).Do(context.Background())
+// 	if err != nil {
+// 		fmt.Printf("failed to send transaction: %s\n", err)
+// 		return
+// 	}
+// 	fmt.Printf("Transaction ID raw: %s\n", txid)
+// 	// Wait for transaction to be confirmed
+// 	GetAccountRepository().waitForConfirmation( txid, algodClient)
+// 	// print created assetholding for this asset and Account 3 and Account 1
+// 	// You should see amount of 0 in Account 3, and 1000 in Account 1
+// 	fmt.Printf("Asset ID: %d\n", assetID)
+// 	fmt.Printf("recipient")
+// 	fmt.Printf("Account 3: %s\n", accounts[2].PublicKey)
+// 	printAssetHolding(assetID, accounts[2].PublicKey, algodClient)
+// 	fmt.Printf("target")
+// 	fmt.Printf("Account 1: %s\n", accounts[0].PublicKey)
+// 	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
+// }
 
 	// Your terminal output should look similar to this...
 
@@ -438,51 +456,51 @@ func revoke()	{
 
 	// assetID := uint64(332920)
 	// Get network-related transaction parameters and assign
-func destroy()	{
-	txParams, err = algodClient.SuggestedParams().Do(context.Background())
-	if err != nil {
-		fmt.Printf("Error getting suggested tx params: %s\n", err)
-		return
-	}
-	// comment out the next two (2) lines to use suggested fees
-	txParams.FlatFee = true
-	txParams.Fee = 1000
+// func destroy()	{
+// 	txParams, err = algodClient.SuggestedParams().Do(context.Background())
+// 	if err != nil {
+// 		fmt.Printf("Error getting suggested tx params: %s\n", err)
+// 		return
+// 	}
+// 	// comment out the next two (2) lines to use suggested fees
+// 	txParams.FlatFee = true
+// 	txParams.Fee = 1000
 
-	txn, err = transaction.MakeAssetDestroyTxn(manager, note, txParams, assetID)
-	if err != nil {
-		fmt.Printf("Failed to send txn: %s\n", err)
-		return
-	}
-	txid, stx, err = crypto.SignTransaction(ed25519.PrivateKey(accounts[0].SecretKey), txn)
-	if err != nil {
-		fmt.Printf("Failed to sign transaction: %s\n", err)
-		return
-	}
-	fmt.Printf("Transaction ID: %s\n", txid)
-	// Broadcast the transaction to the network
-	sendResponse, err = algodClient.SendRawTransaction(stx).Do(context.Background())
-	if err != nil {
-		fmt.Printf("failed to send transaction: %s\n", err)
-		return
-	}
-	fmt.Printf("Transaction ID raw: %s\n", txid)
-	// Wait for transaction to be confirmed
-	GetAccountRepository().waitForConfirmation(txid,algodClient)
-	fmt.Printf("Asset ID: %d\n", assetID)	
-	fmt.Printf("Account 3 must do a transaction for an amount of 0, \n" )
-    fmt.Printf("with a closeRemainderTo to the creator account, to clear it from its accountholdings. \n")
-    fmt.Printf("For Account 1, nothing should print after this as the asset is destroyed on the creator account \n")
+// 	txn, err = transaction.MakeAssetDestroyTxn(manager, note, txParams, assetID)
+// 	if err != nil {
+// 		fmt.Printf("Failed to send txn: %s\n", err)
+// 		return
+// 	}
+// 	txid, stx, err = crypto.SignTransaction(ed25519.PrivateKey(accounts[0].SecretKey), txn)
+// 	if err != nil {
+// 		fmt.Printf("Failed to sign transaction: %s\n", err)
+// 		return
+// 	}
+// 	fmt.Printf("Transaction ID: %s\n", txid)
+// 	// Broadcast the transaction to the network
+// 	sendResponse, err = algodClient.SendRawTransaction(stx).Do(context.Background())
+// 	if err != nil {
+// 		fmt.Printf("failed to send transaction: %s\n", err)
+// 		return
+// 	}
+// 	fmt.Printf("Transaction ID raw: %s\n", txid)
+// 	// Wait for transaction to be confirmed
+// 	GetAccountRepository().waitForConfirmation(txid,algodClient)
+// 	fmt.Printf("Asset ID: %d\n", assetID)	
+// 	fmt.Printf("Account 3 must do a transaction for an amount of 0, \n" )
+//     fmt.Printf("with a closeRemainderTo to the creator account, to clear it from its accountholdings. \n")
+//     fmt.Printf("For Account 1, nothing should print after this as the asset is destroyed on the creator account \n")
 
-	// print created asset and asset holding info for this asset (should not print anything)
+// 	// print created asset and asset holding info for this asset (should not print anything)
 
-	printCreatedAsset(assetID, accounts[0].PublicKey, algodClient)
-	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
+// 	printCreatedAsset(assetID, accounts[0].PublicKey, algodClient)
+// 	printAssetHolding(assetID, accounts[0].PublicKey, algodClient)
 
-	// Your terminal output should look similar to this...
+// 	// Your terminal output should look similar to this...
 
-	// Transaction PI4U7DJZYDKEZS2PKTNGB6DFNVCCEYN5FNLZBBWNONTWMA7RH6AA confirmed in round 4086093
-	// Asset ID: 2654040
-	// Account 3 must do a transaction for an amount of 0, 
-	// with a closeRemainderTo to the creator account, to clear it from its accountholdings.
-	// For Account 1, nothing should print after this as the asset is destroyed on the creator account
-}
+// 	// Transaction PI4U7DJZYDKEZS2PKTNGB6DFNVCCEYN5FNLZBBWNONTWMA7RH6AA confirmed in round 4086093
+// 	// Asset ID: 2654040
+// 	// Account 3 must do a transaction for an amount of 0, 
+// 	// with a closeRemainderTo to the creator account, to clear it from its accountholdings.
+// 	// For Account 1, nothing should print after this as the asset is destroyed on the creator account
+// }
